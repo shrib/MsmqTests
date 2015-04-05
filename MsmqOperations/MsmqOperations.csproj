@@ -7,8 +7,8 @@
     <ProjectGuid>{004BD47B-D301-4A46-B7E2-1542A4BA9CF0}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>MsmqOperations</RootNamespace>
-    <AssemblyName>MsmqOperations</AssemblyName>
+    <RootNamespace>Webhive.Blog.MsmqOperations</RootNamespace>
+    <AssemblyName>Webhive.Blog.MsmqOperations</AssemblyName>
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
   </PropertyGroup>
@@ -34,13 +34,10 @@
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
-    <Reference Include="System.Xml.Linq" />
-    <Reference Include="System.Data.DataSetExtensions" />
-    <Reference Include="Microsoft.CSharp" />
-    <Reference Include="System.Data" />
-    <Reference Include="System.Xml" />
+    <Reference Include="System.Messaging" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="MsmqActions.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
