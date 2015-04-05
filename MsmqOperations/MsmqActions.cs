@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Messaging;
 using System.Diagnostics;
+using System.Threading.Tasks;
 
 namespace Webhive.Blog.MsmqOperations {
     class MsmqActions {
         public static void CreateQueue(string queueName) {
-            if (MessageQueue.Exists(queueName)) { Console.WriteLine("Queue '{0}' already exists.", queueName); 
-            }
+            if (MessageQueue.Exists(queueName)) { Console.WriteLine("Queue '{0}' already exists.", queueName); }
 
             try {
                 var queue = MessageQueue.Create(queueName);
@@ -53,8 +53,30 @@ namespace Webhive.Blog.MsmqOperations {
             queue.Dispose();
         }
 
-        public static void DequeueMessages(string queueName) {
-            //
+        public static void DequeueMessages<T>(string queueName, Action<T> doThis) {
+            var stopwatch = Stopwatch.StartNew();
+            var queue = new MessageQueue(queueName) { Formatter = new BinaryMessageFormatter() };
+
+            try {
+                var msgs = queue.GetAllMessages();
+
+                foreach (var msg in msgs) {
+                    msg.Formatter = new BinaryMessageFormatter();
+                    var body = (T) msg.Body;
+
+                    Task.Factory.StartNew(() => { doThis.Invoke(body); });
+
+                    queue.ReceiveById(msg.Id); // Get the message off the queue.
+                }
+
+                stopwatch.Stop();
+                Console.WriteLine("Successfully dequeued '{0}' messages in '{1}' milliseconds.", msgs.Length, stopwatch.ElapsedMilliseconds);
+            }
+            catch (MessageQueueException ex) {
+                Console.WriteLine("Error enqueuing messages: {0}", ex);
+            }
+
+            queue.Dispose();
         }
     }
 }
