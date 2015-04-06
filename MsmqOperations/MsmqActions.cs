@@ -28,7 +28,7 @@ namespace Webhive.Blog.MsmqOperations {
 
             try {
                 for (var index = 0; index < numberOfMessages; ++index) {
-                    var msg = new Message(message) { Formatter = new BinaryMessageFormatter() };
+                    var msg = new Message(message) { Formatter = new BinaryMessageFormatter(), Label = index.ToString() };
                     queue.Send(msg);
                 }
 
@@ -65,9 +65,9 @@ namespace Webhive.Blog.MsmqOperations {
 
                 foreach (var msg in msgs) {
                     msg.Formatter = new BinaryMessageFormatter();
-                    Task.Factory.StartNew(() => { doThis.Invoke((T) msg.Body); });
-
                     queue.ReceiveById(msg.Id); // Get the message off the queue.
+
+                    Task.Factory.StartNew(() => { doThis.Invoke((T) msg.Body); });
                 }
 
                 stopwatch.Stop();
