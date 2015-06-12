@@ -1,11 +1,45 @@
-﻿using System;
+using System;
 using System.Messaging;
 using System.Diagnostics;
 using System.Threading.Tasks;
 
 namespace Webhive.Blog.MsmqOperations {
+    interface IMessageFormatterCreator {
+        IMessageFormatter CreateNewInstance();
+    }
+
+    class BinaryMessageFormaterCreator : IMessageFormatterCreator {
+        public IMessageFormatter CreateNewInstance() {
+            return new BinaryMessageFormatter();
+        }
+    }
+
+    class XmlMessageFormatterCreator : IMessageFormatterCreator {
+        public IMessageFormatter CreateNewInstance() {
+            return new XmlMessageFormatter();
+        }
+    }
+
+    class ActiveXMessageFormatterCreator : IMessageFormatterCreator {
+        public IMessageFormatter CreateNewInstance() {
+            return new ActiveXMessageFormatter();
+        }
+    }
+
+
     class MsmqActions {
-        public static void CreateQueue(string queueName) {
+        readonly IMessageFormatterCreator _messageFormatterCreator;
+
+        private MsmqActions(IMessageFormatterCreator messageFormatterCreator) {
+            _messageFormatterCreator = messageFormatterCreator;
+        }
+
+        public static MsmqActions WithFormatter(IMessageFormatterCreator messageFormatterCreator) {
+            return new MsmqActions(messageFormatterCreator);
+        }
+
+
+        public void CreateQueue(string queueName) {
             if (MessageQueue.Exists(queueName)) {
                 Console.WriteLine("Queue '{0}' already exists.", queueName);
                 return;
@@ -22,28 +56,30 @@ namespace Webhive.Blog.MsmqOperations {
             }
         }
 
-        public static void EnqueueMessages<T>(string queueName, T message, int numberOfMessages) {
+        public void EnqueueMessages<T>(string queueName, T message, int numberOfMessages) {
             var stopwatch = Stopwatch.StartNew();
-            var queue = new MessageQueue(queueName) { Formatter = new BinaryMessageFormatter() };
+            var queue = new MessageQueue(queueName) { Formatter = _messageFormatterCreator.CreateNewInstance() };
 
             try {
                 for (var index = 0; index < numberOfMessages; ++index) {
-                    var msg = new Message(message) { Formatter = new BinaryMessageFormatter(), Label = index.ToString() };
+                    var msg = new Message(message) { Formatter = _messageFormatterCreator.CreateNewInstance(), Label = index.ToString() };
                     queue.Send(msg);
                 }
-
-                stopwatch.Stop();
-                Console.WriteLine("Successfully enqueued '{0}' messages in '{1}' milliseconds.", numberOfMessages, stopwatch.ElapsedMilliseconds);
             }
             catch (MessageQueueException ex) {
                 Console.WriteLine("Error enqueuing messages: {0}", ex);
             }
+            finally {
+                stopwatch.Stop();
+            }
+
+            Console.WriteLine("Successfully enqueued '{0}' messages in '{1}' milliseconds.", numberOfMessages, stopwatch.ElapsedMilliseconds);
 
             queue.Dispose();
         }
 
-        public static void PurgeQueue(string queueName) {
-            var queue = new MessageQueue(queueName) { Formatter = new BinaryMessageFormatter() };
+        public void PurgeQueue(string queueName) {
+            var queue = new MessageQueue(queueName) { Formatter = _messageFormatterCreator.CreateNewInstance() };
 
             try {
                 queue.Purge();
@@ -56,22 +92,26 @@ namespace Webhive.Blog.MsmqOperations {
             queue.Dispose();
         }
 
-        public static void DequeueMessagesBulk<T>(string queueName, Action<T> doThis) {
+        public void DequeueMessagesBulk<T>(string queueName, Action<T> doThis) {
             var stopwatch = Stopwatch.StartNew();
-            var queue = new MessageQueue(queueName) { Formatter = new BinaryMessageFormatter() };
+            var queue = new MessageQueue(queueName) { Formatter = _messageFormatterCreator.CreateNewInstance() };
 
             try {
                 var msgs = queue.GetAllMessages();
+                var msgCount = 0;
 
                 foreach (var msg in msgs) {
-                    msg.Formatter = new BinaryMessageFormatter();
-                    queue.ReceiveById(msg.Id); // Get the message off the queue.
+                    msg.Formatter = _messageFormatterCreator.CreateNewInstance();
+                    var dequeued = queue.ReceiveById(msg.Id); // Get the message off the queue.
 
-                    Task.Factory.StartNew(() => { doThis.Invoke((T) msg.Body); });
+                    if (dequeued != null) {
+                        msgCount++;
+                        Task.Factory.StartNew(() => { doThis.Invoke((T) dequeued.Body); });
+                    }
                 }
 
                 stopwatch.Stop();
-                Console.WriteLine("Successfully dequeued '{0}' messages in '{1}' milliseconds.", msgs.Length, stopwatch.ElapsedMilliseconds);
+                Console.WriteLine("Successfully dequeued '{0}' messages in '{1}' milliseconds.", msgCount, stopwatch.ElapsedMilliseconds);
             }
             catch (MessageQueueException ex) {
                 Console.WriteLine("Error dequeuing messages: {0}", ex);
@@ -80,23 +120,31 @@ namespace Webhive.Blog.MsmqOperations {
             queue.Dispose();
         }
 
-        public static void DequeueMessagesSequential<T>(string queueName, Action<T> doThis) {
+        public void DequeueMessagesSequential<T>(string queueName, Action<T> doThis) {
             var stopwatch = Stopwatch.StartNew();
-            var queue = new MessageQueue(queueName) { Formatter = new BinaryMessageFormatter() };
+            var queue = new MessageQueue(queueName) { Formatter = _messageFormatterCreator.CreateNewInstance() };
 
             try {
                 var msgCount = 0;
 
                 while (true) {
-                    var msg = queue.Receive(TimeSpan.FromSeconds(1));
-                    if (msg == null) {
-                        stopwatch.Stop();
-                        break;
+                    Message msg = null;
+
+                    try {
+                        msg = queue.Receive(TimeSpan.FromSeconds(1));
+                    }
+                    catch (MessageQueueException timeout) {
+                        if (timeout.Message.IndexOf("Timeout for the requested operation has expired.", StringComparison.Ordinal) >= 0) {
+                            stopwatch.Stop();
+                            break;
+                        }
                     }
 
-                    msgCount++;
-                    msg.Formatter = new BinaryMessageFormatter();
-                    Task.Factory.StartNew(() => { doThis.Invoke((T) msg.Body); });
+                    if (msg != null) {
+                        msgCount++;
+                        msg.Formatter = _messageFormatterCreator.CreateNewInstance();
+                        Task.Factory.StartNew(() => { doThis.Invoke((T) msg.Body); });
+                    }
                 }
 
                 Console.WriteLine("Successfully dequeued '{0}' messages in '{1}' milliseconds.", msgCount, stopwatch.ElapsedMilliseconds - 1000); // Subtract the 1 second receive-wait-time.
